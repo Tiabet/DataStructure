@@ -1,0 +1,131 @@
+import numpy as np
+from cvxopt import matrix, solvers
+import cvxopt
+import codecs
+from time import time
+
+f_point = codecs.open('point_2x0.txt', 'r',encoding='utf8')
+f_return = codecs.open('matrix_cp_return.txt', 'r', encoding='utf8')
+f_Ldata = codecs.open('Ldata.txt', 'r', encoding='utf8') #cp_mean을 칼럼썸한 파일.
+f_vars = open('vars.txt', 'r') #vars와 같은 파일.
+
+point_2x0 = []
+cp_return_s = []
+vars = []
+cp_mean =np.zeros((3000, 1))
+
+
+#point_2x0.txt 읽고 배열로 만드는 과정
+line_point = f_point.readline() 
+for i in range(0, 3000):
+    line_point = f_point.readline()
+    line_point = line_point.replace("\n", "");
+    pushData_point = line_point.split('\t')
+    point_2x0.append(float(pushData_point[1]))
+    
+
+#matrix_cp_return.txt 읽고 배열로 만든 후 행렬에 넣는 과정
+line_return= f_return.readline() # 텍스트 파일에 첫 번째 줄은 x1과 같은 값들이기 때문에 필요 없음.
+line_return= f_return.readline()
+line_return = line_return.replace("\n", "");
+pushData_return = line_return.split('\t')
+for i in range(0,3000):    
+    cp_return_s.append(float(pushData_return[i])) 
+cp_return = matrix(cp_return_s) #lp를 solve하기 위해 matrix로 바꿔줌.
+
+
+#Ldata.txt를 읽고 행렬에 넣는 과정. *Ldata.txt는 cp_mean을 미리 합쳐둔 파일임. 로딩 시간을 단축하기 위해 미리 생성함. 엑셀로 따로 만들어서 사용했음.
+line_Ldata = f_Ldata.readline()
+pushData_Ldata = line_Ldata.split('\t')
+for i in range(0,3000):        
+    cp_mean[i]=(float(pushData_Ldata [i])) 
+Cost = -matrix(cp_mean) #Ldata의 값들이 모두 음수이므로 양수로 바꿔 줌, 목적함수 변수의 계수.
+
+
+#vars.txt를 읽고 배열로 만드는 과정
+for i in range(0, 80000):
+    line_vars = f_vars.readline()
+    line_vars = line_vars.replace("\n",'')
+    pushData_vars = line_vars.split('\t')
+    temp=[] #vars라는 배열에 한번에 넣기 위해 편의상 생성한 임시 배열.
+    for j in range(0,len(pushData_vars)-1):
+            temp.append(int(pushData_vars[j]))
+    vars.append(temp)
+
+    
+#실제로 해결할 때는 메모리 초과로 인해 IF문을 사용해서 2만개씩 나누어 계산하였음.
+
+
+f_point.close()
+f_return.close()
+f_Ldata.close()
+f_vars.close()
+
+#-----------------------------------------------------데이터 값 정렬 완료-----------------------------------------------------#
+
+
+
+
+left_coefficient = np.concatenate((np.ones((1,3000)),-np.ones((1,3000)),-cp_return.T,-np.eye(3000, dtype=int),np.eye(3000, dtype=int)),axis=0)
+#left_coefficient라는 배열은 좌변 계수를 의미. 이 매트릭스 안에는 1x3000행렬에 전부 1, 1x3000행렬에 전부 -1, cp.return의 트랜스포즈한 음수값, 3000*3000의 음수 단위행렬, 3000*3000 단위행렬이 들어감
+
+left_coefficient=matrix(left_coefficient) #LP Solve를 위해 행렬로 변환.
+
+#create full RHS 
+constant=-0.0963007951203275
+right_constraint = matrix([1,-1,constant,matrix(np.zeros((3000,1))),matrix(point_2x0)])
+
+#위에서부터 1, -1, constant, 3000*1 전부 0, point_2x0 값이 들어가 있음.
+
+
+#-----------------------------------------------------제약 조건 생성 완료-----------------------------------------------------#
+
+from time import time
+
+f_result = open('result.txt',mode = 'w',encoding='utf-8')
+
+for i in range(0,80000): # 8만개 해결
+    
+    s_right_c=right_constraint
+    s_cost=Cost[vars[i],:] #vars[i]엔 i번째 lp에 사용한 x들이 적혀있음.
+    s_left_c=left_coefficient[:,vars[i]] 
+  
+  
+    start=time()
+    sol=solvers.lp(s_cost,s_left_c,s_right_c, solver = 'glpk') #glpk를 사용해서 lp푸는 시간 최적화. glpk 사용 x = 하나당 최소 5초, glpk 사용 o = 하나당 최대 0.2초
+    end=time() #끝난 시간
+    timecost=end-start #걸린 시간.
+
+    if sol['x'] is None :
+      Sol_result = matrix(np.ones((3000, 1)))#사용하지 않은 x들값에 1을 대입. 0이 아니라 1을 대입한 이유는 사용된 x중에서도 최적해가 0인 x들이 있기 때문에 구분하기 위함.
+      Sol_result[vars[i],:] = 0 
+      Solution = str(Sol_result) 
+      Solution=Solution.replace("\n","")
+      Solution=Solution.replace("[","")
+      Solution=Solution.replace("]","")
+      f_result.write(Solution+'\t')
+      f_result.write("no solution"+'\t') #infeasible 등의 이유로 해를 구하지 못하였을 때는 그 줄에 no solution만 적음
+      f_result.write(str(timecost)+'\n')
+
+    else :
+      Sol_result = matrix(np.ones((3000, 1))) #사용하지 않은 x들값에 1을 대입. 0이 아니라 1을 대입한 이유는 사용된 x중에서도 최적해가 0인 x들이 있기 때문에 구분하기 위함.
+      Sol_result[vars[i],:]=sol['x'] #sol['x']는 사용한 x들의 optimal값만 들어있어서 사용하지 않은 x들 값을 반영하지 못함.
+      Solution = str(Sol_result) 
+      Solution=Solution.replace("\n","")
+      Solution=Solution.replace("[","")
+      Solution=Solution.replace("]","") #편의를 위해 한 줄에 LP 1개의 solution이 들어가게 편집함.
+      opt_value=sol['x'].T*s_cost
+      
+
+      opt_value=str(opt_value)
+      opt_value=opt_value.replace("[","")
+      opt_value=opt_value.replace("]","")
+      opt_value=opt_value.replace("\n","")
+      f_result.write(Solution+"\t")
+      f_result.write(opt_value+"\t")
+      f_result.write(str(timecost)+'\n')#optimal solution, optimal value, 걸린 시간을 순서대로 적음
+
+    print(i+1,'번째 LP Solved')
+
+f_result.close()
+#-----------------------------------------------------LP 풀고 데이터 출력 완료-----------------------------------------------------#
